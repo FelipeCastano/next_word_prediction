@@ -1,0 +1,5 @@
+fastapi==0.111.0
+numpy==1.26.4
+pandas==2.3.0
+conllu==6.0.0
+nltk==3.8.1 

@@ -1,0 +1,12 @@
+# Ignorar checkpoints de Jupyter
+**/.ipynb_checkpoints/
+
+# Ignorar notebooks específicos
+
+# Archivos auxiliares de Windows (metadatos)
+*.Zone.Identifier
+
+# Ignorar pycache
+__pycache__/
+src/model/__pycache__/
+
