@@ -1,88 +1,92 @@
 import streamlit as st
 import requests
-from streamlit.components.v1 import html
 
-# Tag to color
-TAG_COLORS = {
-    "NN": "#1f77b4",
-    "NNP": "#ff7f0e",
-    "VB": "#2ca02c",
-    "JJ": "#d62728",
-    "RB": "#9467bd",
-    "PRP": "#8c564b",
-    "DT": "#e377c2",
-    "IN": "#7f7f7f",
-    "CC": "#bcbd22",
-    "CD": "#17becf",
-    "RP": "#aec7e8",
-    "UH": "#ff9896",
-    ".": "#c5b0d5",
-    "SYM": "#c49c94",
-    "FW": "#f7b6d2",
-    "": "#dddddd"
-}
+st.title("Predictor de la siguiente palabra")
 
-# Tag to full name
-TAG_TRANSLATIONS = {
-    "NN": "Noun",
-    "NNP": "Proper Noun",
-    "VB": "Verb",
-    "JJ": "Adjective",
-    "RB": "Adverb",
-    "PRP": "Pronoun",
-    "DT": "Determiner",
-    "IN": "Preposition",
-    "CC": "Coordinating Conjunction",
-    "CD": "Cardinal Number",
-    "RP": "Particle",
-    "UH": "Interjection",
-    ".": "Punctuation",
-    ",": "Punctuation",
-    ":": "Punctuation",
-    "SYM": "Symbol",
-    "FW": "Foreign Word",
-    "": "Unknown"
-}
+# Estado inicial
+if "lang" not in st.session_state:
+    st.session_state.lang = 2  # Español por defecto
+if "input_text" not in st.session_state:
+    st.session_state.input_text = ""
+if "last_input_text" not in st.session_state:
+    st.session_state.last_input_text = ""
+if "prediction" not in st.session_state:
+    st.session_state.prediction = []  # Lista de sugerencias
 
-def render_tagged_tokens(tokens, tags):
-    html_content = "<div style='display: flex; gap: 10px; flex-wrap: wrap;'>"
-    for token, tag in zip(tokens, tags):
-        color = TAG_COLORS.get(tag, "#dddddd")
-        label = TAG_TRANSLATIONS.get(tag, "Unknown")
-        html_content += f"""
-            <div style="
-                border: 3px solid {color};
-                padding: 8px;
-                border-radius: 8px;
-                text-align: center;
-                width: fit-content;
-                min-width: 60px;
-            ">
-                <div style="font-weight: bold;">{token}</div>
-                <div style="font-size: 12px; color: #555;">{label}</div>
-            </div>
-        """
-    html_content += "</div>"
-    html(html_content, height=200)
+# Selección de idioma usando radio en lugar de checkboxes
+lang_option = st.radio("Selecciona el idioma:", options=["Español", "Inglés"], index=0 if st.session_state.lang == 2 else 1)
+st.session_state.lang = 2 if lang_option == "Español" else 1
 
-# UI in English
-st.title("Sentence Tagging")
+# Input del usuario
+input_text = st.text_input("Escribe algo:", value=st.session_state.input_text, key="user_input")
+st.session_state.input_text = input_text
 
-text_input = st.text_area("Enter your text:", height=300)
-language = st.selectbox("Select language:", ["Spanish", "English"])
-language_code = {"Spanish": 0, "English": 1}
-
-if st.button("Analyze"):
-    if text_input.strip():
-        payload = {"text": text_input, "lang": language_code[language]}
-        try:
-            response = requests.post("http://api:8000/get_tag", json=payload)
-            if response.status_code == 200:
-                result = response.json()
-                render_tagged_tokens(result["tokens"], result["tags"])
-            else:
-                st.error(f"Server error: {response.status_code}")
-        except Exception as e:
-            st.error(f"Backend connection error: {e}")
+# Función para construir el payload
+def construir_payload(input_text):
+    tokens = input_text.strip().split()
+    if input_text.endswith(" "):
+        starts_with = ""
+        text_tokens = tokens[-3:]
     else:
-        st.warning("Please enter some text.")
+        starts_with = tokens[-1] if tokens else ""
+        text_tokens = tokens[-4:-1] if len(tokens) >= 2 else []
+    text = " ".join(text_tokens)
+    return text, starts_with
+
+# Función para obtener sugerencias de la API
+def generar_prediccion():
+    if st.session_state.lang and input_text.strip():
+        text, starts_with = construir_payload(input_text)
+        payload = {
+            "text": text,
+            "lang": st.session_state.lang,
+            "starts_with": starts_with
+        }
+
+        try:
+            response = requests.post("http://api:8000/get_next_word", json=payload)
+            response.raise_for_status()
+            result = response.json()
+
+            # Procesar las sugerencias
+            sugerencias = []
+            for key in sorted(result.keys()):
+                sugerencia = result[key]
+                sugerencias.append({
+                    "word": sugerencia["word"],
+                    "prob": sugerencia["prob"]
+                })
+
+            st.session_state.prediction = sugerencias
+
+        except requests.RequestException as e:
+            st.error(f"Error al conectar con la API: {e}")
+            st.session_state.prediction = []
+    else:
+        st.session_state.prediction = []
+
+# Detectar cambios en el input
+if input_text != st.session_state.last_input_text:
+    st.session_state.last_input_text = input_text
+    generar_prediccion()
+
+# Mostrar botones de sugerencias sin probabilidad
+if st.session_state.prediction:
+    st.markdown("### Palabras sugeridas:")
+    cols = st.columns(len(st.session_state.prediction))
+    for i, sugerencia in enumerate(st.session_state.prediction):
+        word = sugerencia["word"]
+        with cols[i]:
+            if st.button(f"{word}", key=f"sugerencia_{i}"):
+                if input_text.endswith(" "):
+                    st.session_state.input_text = input_text + word + " "
+                else:
+                    tokens = input_text.strip().split()
+                    if tokens:
+                        tokens[-1] = word
+                    else:
+                        tokens = [word]
+                    st.session_state.input_text = " ".join(tokens) + " "
+
+                st.session_state.last_input_text = st.session_state.input_text
+                st.rerun()

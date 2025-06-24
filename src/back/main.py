@@ -1,84 +1,55 @@
 from fastapi import FastAPI
 from pydantic import BaseModel
-from model.viterbi_tagger import ViterbiTagger
-from model.utils import assign_unk_english, assign_unk_espanish, load_conllu_data, load_data_english
-import nltk
-nltk.download('punkt')
-from nltk.tokenize import word_tokenize
+from model.ngrams import Ngrams
+from model.utils import load_data, tokenize_sentences, count_words, get_words_with_nplus_frequency, replace_oov_words_by_unk
 
 
-def init_viterbi_tagger_en():
-    train_path = "data/WSJ_02-21.pos"
-    test_path = "data/WSJ_24.pos"
-    corpus_path = "data/hmm_vocab.txt"
-    training_corpus, y, vocab = load_data_english(train_path, test_path, corpus_path)
-    alpha = 0.001
-    tagger = ViterbiTagger(vocab, alpha)
-    tagger.create_dictionaries(training_corpus, vocab)
-    tagger.create_transition_matrix()
-    tagger.create_emission_matrix()
-    return tagger
+def init_ngrams_en():
+    train_path = "data/english_tweets_train.csv"
+    train_data = load_data(train_path)[:500]
+    train_tokenized = tokenize_sentences(train_data, True)
+    vocabulary = get_words_with_nplus_frequency(train_tokenized, count_threshold=1)
+    train_data_replaced = replace_oov_words_by_unk(train_tokenized, vocabulary, unknown_token='<unk>')
+    k = 1
+    ngram = Ngrams(1)
+    ngram.create_n_grams(train_data_replaced, vocabulary)
+    return ngram
 
-def init_viterbi_tagger_es():
-    train_file = "data/es_ancora-ud-train.conllu"
-    test_file = "data/es_ancora-ud-test.conllu"
-    training_corpus, y, vocab = load_conllu_data(train_file, test_file)
-    alpha = 0.001
-    tagger = ViterbiTagger(vocab, alpha)
-    tagger.create_dictionaries(training_corpus, vocab)
-    tagger.create_transition_matrix()
-    tagger.create_emission_matrix()
-    return tagger
-
-def tokenize(text, lang):
-    nlp = spacy_en if lang == 1 else spacy_es
-    doc = nlp(text)
-    return [token.text for token in doc]
-
-def tokenize(text, lang):
-    if lang == 1:
-        return word_tokenize(text, language='english')
-    else:
-        return word_tokenize(text, language='spanish')
+def init_ngrams_es():
+    train_path = "data/spanish_tweets_train.csv"
+    train_data = load_data(train_path)[:500]
+    train_tokenized = tokenize_sentences(train_data, False)
+    vocabulary = get_words_with_nplus_frequency(train_tokenized, count_threshold=1)
+    train_data_replaced = replace_oov_words_by_unk(train_tokenized, vocabulary, unknown_token='<unk>')
+    k = 1
+    ngram = Ngrams(1)
+    ngram.create_n_grams(train_data_replaced, vocabulary)
+    return ngram
     
-def preprocess_text(text, lang, tagger):
-    if lang == 1:
-        assign_unk = assign_unk_english 
-    else:
-        assign_unk = assign_unk_espanish
-    
-    text = tokenize(text, lang)
-    prep = []
-    for item in text:
-        word = item.split('\t')[0]
-        if not word in tagger.vocab.keys():
-            prep.append(assign_unk(word))
-        else:
-            prep.append(word)
-    return prep
-
-
-
+def preprocess_text(text, lang, ngram):
+    text = tokenize_sentences([text], lang)
+    text = replace_oov_words_by_unk(text, ngram.vocabulary, unknown_token='<unk>')
+    return text[0]
 
 app = FastAPI()
-
-tagger_en = init_viterbi_tagger_en()
-tagger_es = init_viterbi_tagger_es()
+ngram_en = init_ngrams_en()
+ngram_es = init_ngrams_es()
 
 class TagRequest(BaseModel):
-    text: str
+    text: str  
     lang: int  # 1 = English, 2 = Spanish
+    starts_with: str  # 1 = English, 2 = Spanish
 
-@app.post("/get_tag")
-def get_tag(request: TagRequest):
-    tagger = tagger_en if request.lang == 1 else tagger_es
-    prep = preprocess_text(request.text, request.lang, tagger)
-    tagger.initialize(prep)
-    tagger.viterbi_forward(prep)
-    pred = tagger.viterbi_backward(prep)
+@app.post("/get_next_word")
+def get_next_word(request: TagRequest):
+    ngram = ngram_en if request.lang == 1 else ngram_es
+    lang = request.lang == 1
+    prep = preprocess_text(request.text, lang, ngram)
+    r = ngram.top_3_suggestions(prep, request.starts_with)
     result = {
-      "tokens": prep,
-      "tags": pred
+        '1': {"word": r[0][0], "prob": r[0][1]},
+        '2': {"word": r[1][0], "prob": r[1][1]},
+        '3': {"word": r[2][0], "prob": r[2][1]},
     }
     return result
 

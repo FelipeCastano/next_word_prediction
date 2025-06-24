@@ -7,7 +7,8 @@ WORKDIR /app
 COPY back_requirements.txt requirements.txt
 
 RUN pip install --no-cache-dir -r requirements.txt
-RUN python -m nltk.downloader punkt stopwords averaged_perceptron_tagger
+RUN python -m spacy download en_core_web_sm
+RUN python -m spacy download es_core_news_sm
 
 EXPOSE 8000
 
