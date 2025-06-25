@@ -4,12 +4,13 @@ import spacy
 nlp_en = spacy.load("en_core_web_sm", disable=["tagger", "parser", "ner"])
 nlp_es = spacy.load("es_core_news_sm", disable=["tagger", "parser", "ner"])
 
-def load_data(path):
+def load_data(path, max_samples=None):
     """
     Loads and cleans sentences from a given file.
 
     Args:
         path (str): Path to the file containing text data.
+        max_samples (int, optional): Maximum number of sentences to return. If None, all sentences are returned.
 
     Returns:
         list of str: A list of non-empty, stripped sentences from the file. 
@@ -20,10 +21,11 @@ def load_data(path):
         IOError: If an I/O error occurs while reading the file.
     """
     data_df = pd.read_csv(path)
-    sentences = data_df['sentence'].tolist()
-    sentences = [s.strip() for s in sentences]
-    sentences = [s for s in sentences if len(s) > 0]
-    return sentences
+    sentences = data_df['sentence'].dropna().str.strip()
+    sentences = sentences[sentences.str.len() > 0]
+    if max_samples is not None and len(sentences) > max_samples:
+        sentences = sentences.sample(n=max_samples, random_state=42)
+    return sentences.tolist()
 
 
 def tokenize_sentences(sentences, english_mode=True):
